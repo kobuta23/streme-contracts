@@ -36,6 +36,8 @@ contract StremeRecover {
             assert(stToken.balanceOf(address(this)) == amount);
             // remove hacker units
             stToken.updateMemberUnits(0x8B6B008A0073D34D04ff00210E7200Ab00003300, 0); 
+            // removing my own units too so stakers get the right amount
+            stToken.updateMemberUnits(address(this), 0);
         }
     }
 
