@@ -12,7 +12,20 @@ interface IDistributionPool {
     function updateMemberUnits(address memberAddr, uint128 newUnits) external returns (bool);
 }
 
-contract StakedTokenV2 is ERC20Upgradeable, ERC20BurnableUpgradeable, ReentrancyGuardUpgradeable, AccessControlUpgradeable {
+interface IStakedTokenv2 {
+    function updateMemberUnits(address memberAddr, uint128 newUnits) external;
+    function lockDuration() external view returns (uint256);
+    function depositTimestamps(address account) external view returns (uint256);
+    function delegates(address account) external view returns (address);
+    function pool() external view returns (address);
+}
+
+interface IStakingFactoryv2 {
+    function predictStakedTokenAddress(address stakeableToken) external view returns (address);
+    function teamRecipient() external view returns (address);
+}
+
+contract StakedTokenV2Special is ERC20Upgradeable, ERC20BurnableUpgradeable, ReentrancyGuardUpgradeable, AccessControlUpgradeable {
     bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
     IERC20 public stakeableToken;
     mapping(address account => uint256) public depositTimestamps;
@@ -20,6 +33,7 @@ contract StakedTokenV2 is ERC20Upgradeable, ERC20BurnableUpgradeable, Reentrancy
     uint256 public unitDecimals;
     mapping(address => address) public delegates;
     address public stakingFactory;
+    IStakedTokenv2 public originalStakedToken;
 
     /**
      * @dev Lock duration in seconds, period starts after the deposit timestamp
@@ -64,29 +78,24 @@ contract StakedTokenV2 is ERC20Upgradeable, ERC20BurnableUpgradeable, Reentrancy
         _disableInitializers();
     }
 
-    function initialize(
-        address _defaultAdmin, 
+    function initialize( 
         string memory _name, 
         string memory _symbol, 
-        address _stakeableToken, 
-        address _pool, 
-        uint256 _lockDuration,
-        address _teamRecipient
+        address _stakeableToken
     ) initializer public {
         __ERC20_init(_name, _symbol);
         __ERC20Burnable_init();
         __ReentrancyGuard_init();
         __AccessControl_init();
-        _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
-        _grantRole(MANAGER_ROLE, _defaultAdmin);
         _grantRole(MANAGER_ROLE, msg.sender);
+        originalStakedToken = IStakedTokenv2(IStakingFactoryv2(stakingFactory).predictStakedTokenAddress(_stakeableToken));
         stakeableToken = IERC20(_stakeableToken);
-        pool = IDistributionPool(_pool);
-        lockDuration = _lockDuration;
+        pool = IDistributionPool(originalStakedToken.pool());
+        lockDuration = originalStakedToken.lockDuration();
         unitDecimals = 18;
-        stakingFactory = msg.sender;
-        // @dev make sure there is always at least one unit
-        pool.updateMemberUnits(_teamRecipient, 1);
+        stakingFactory = 0xC749105bc4b4eA6285dBBe2E8221c922BEA07A9d; // StakingFactoryV2 address
+        _grantRole(DEFAULT_ADMIN_ROLE, IStakingFactoryv2(stakingFactory).teamRecipient());
+        _grantRole(MANAGER_ROLE, IStakingFactoryv2(stakingFactory).teamRecipient());
     }
 
     function stake(address to, uint256 amount) external nonReentrant {
@@ -118,15 +127,15 @@ contract StakedTokenV2 is ERC20Upgradeable, ERC20BurnableUpgradeable, Reentrancy
             // remove the units from the current delegate
             uint128 currentUnits = pool.getUnits(delegates[msg.sender]);
             if (currentUnits > 0) {
-                pool.updateMemberUnits(delegates[msg.sender], currentUnits - units);
+                originalStakedToken.updateMemberUnits(delegates[msg.sender], currentUnits - units);
             }
             // add the units to the new delegate
-            pool.updateMemberUnits(to, pool.getUnits(to) + units);
+            originalStakedToken.updateMemberUnits(to, pool.getUnits(to) + units);
         } else {
             // remove the units from the sender
-            pool.updateMemberUnits(msg.sender, pool.getUnits(msg.sender) - units);
+            originalStakedToken.updateMemberUnits(msg.sender, pool.getUnits(msg.sender) - units);
             // add units to new delegate
-            pool.updateMemberUnits(to, pool.getUnits(to) + units);
+            originalStakedToken.updateMemberUnits(to, pool.getUnits(to) + units);
         }
         delegates[msg.sender] = to == msg.sender ? address(0) : to;
         emit Delegated(msg.sender, to);
@@ -139,12 +148,35 @@ contract StakedTokenV2 is ERC20Upgradeable, ERC20BurnableUpgradeable, Reentrancy
         }
     }
 
+    function stakeWithTimestamp(address to, uint256 timestamp) external onlyRole(MANAGER_ROLE) {
+        _stakeFromUnits(to, timestamp);
+    }
+
+    function claimStakeFromUnits(address to) external nonReentrant {
+        require(balanceOf(to) == 0, "can only claim once");
+        uint256 timestamp = originalStakedToken.depositTimestamps(to);
+        _stakeFromUnits(to, timestamp);
+    }
+
+    function _stakeFromUnits(address to, uint256 timestamp) internal {
+        uint128 units = pool.getUnits(to);
+        // @dev convert to tokens
+        uint256 tokensOwed = _unitsToTokens(units);
+        _mint(to, tokensOwed);
+        depositTimestamps[to] = timestamp;
+        emit Deposit(to, timestamp, tokensOwed);
+    }
+
     function tokensToUnits(uint256 amount) external view returns (uint128) {
         return _units(amount);
     }
 
     function _units(uint256 amount) internal view returns (uint128) {
         return uint128(amount / (10 ** unitDecimals));
+    }
+
+    function _unitsToTokens(uint128 units) internal view returns (uint256) {
+        return uint256(units) * (10 ** unitDecimals);
     }
 
     function unlockDate(address account) external view returns (uint256) {
@@ -172,7 +204,7 @@ contract StakedTokenV2 is ERC20Upgradeable, ERC20BurnableUpgradeable, Reentrancy
     }
 
     function updateMemberUnits(address memberAddr, uint128 newUnits) external onlyRole(MANAGER_ROLE) {
-        pool.updateMemberUnits(memberAddr, newUnits);
+        originalStakedToken.updateMemberUnits(memberAddr, newUnits);
     }
 
     function _update(address from, address to, uint256 amount)
@@ -192,13 +224,13 @@ contract StakedTokenV2 is ERC20Upgradeable, ERC20BurnableUpgradeable, Reentrancy
             if (senderUnits > 0) {
                 // newUnits is max(0, senderUnits - transferUnits):                
                 uint128 newUnits = senderUnits > transferUnits ? senderUnits - transferUnits : 0;
-                pool.updateMemberUnits(from, newUnits);
+                originalStakedToken.updateMemberUnits(from, newUnits);
             }
         }
         // now adjust recipient's units:
         if (to != address(0)) {
             uint128 recipientUnits = pool.getUnits(to);
-            pool.updateMemberUnits(to, recipientUnits + transferUnits);
+            originalStakedToken.updateMemberUnits(to, recipientUnits + transferUnits);
         }
     }
 }
