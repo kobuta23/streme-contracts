@@ -8,5 +8,7 @@ interface IStakedTokenV2 {
     function stakeableToken() external view returns (address);
     function balanceOf(address account) external view returns (uint256);
     function updateMemberUnits(address memberAddr, uint128 newUnits) external;
+    function tokensToUnits(uint256 amount) external view returns (uint128);
+    function stake(address to, uint256 amount) external;
 }
 

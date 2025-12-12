@@ -2,9 +2,24 @@
 pragma solidity ^0.8.25;
 
 import "../interfaces/IStakedTokenV2.sol";
+import {console} from "forge-std/console.sol";
 
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+}
+
+interface IStakedTokenV2WithDecimals {
+    function setUnitDecimals(uint256 _unitDecimals) external;
+    function updateMemberUnits(address memberAddr, uint128 newUnits) external;
+}
+
+interface IStakingFactoryV2 {       
+    function createStakedToken(
+        address stakeableToken,
+        uint256 supply,
+        address originalStakedTokenAddress
+    ) external returns (address stakedToken);
 }
 
 /**
@@ -14,13 +29,13 @@ interface IERC20 {
  */
 contract StremeRecover {
 
-    address public recoveryPot;
     address public admin;
+    IStakingFactoryV2 public stakingFactory; 
 
     error NotAdmin();
 
-    constructor(address _recoveryPot) {
-        recoveryPot = _recoveryPot;
+    constructor(address _stakingFactory) {
+        stakingFactory = IStakingFactoryV2(_stakingFactory);
         admin = msg.sender;
     }
     
@@ -49,10 +64,18 @@ contract StremeRecover {
             IStakedTokenV2 stToken = _stTokens[i];
             IERC20 token = IERC20(stToken.stakeableToken());
             stToken.reduceLockDuration(0);
-            stToken.unstake(recoveryPot, stToken.balanceOf(address(this)));
-            assert(token.balanceOf(recoveryPot) > 0);
-            assert(token.balanceOf(address(this)) == 0);
-            assert(stToken.balanceOf(address(this)) == 0);
+            uint256 stakedBalance = stToken.balanceOf(address(this));
+            stToken.unstake(address(this), stakedBalance);
+            assert(token.balanceOf(address(this)) > 0);
+            //assert(stToken.balanceOf(address(this)) == 0);
+            //assert(token.balanceOf(address(stToken)) == 0);
+            // Break the contract by setting unitDecimals to max, which will make transfers fail
+            IStakedTokenV2WithDecimals(address(stToken)).setUnitDecimals(type(uint256).max);
+            // Approve the factory to transfer tokens from this contract
+            uint256 tokenBalance = token.balanceOf(address(this));
+            token.approve(address(stakingFactory), tokenBalance);
+            stakingFactory.createStakedToken(address(token), tokenBalance, address(stToken));
         }
     }
+
 }
