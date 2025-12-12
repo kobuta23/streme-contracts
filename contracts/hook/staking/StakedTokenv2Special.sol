@@ -32,7 +32,7 @@ contract StakedTokenV2Special is ERC20Upgradeable, ERC20BurnableUpgradeable, Ree
     IDistributionPool public pool;
     uint256 public unitDecimals;
     mapping(address => address) public delegates;
-    address public stakingFactory;
+    address public constant oldStakingFactory = 0xC749105bc4b4eA6285dBBe2E8221c922BEA07A9d; // StakingFactoryV2(not special version) address
     IStakedTokenv2 public originalStakedToken;
 
     /**
@@ -81,21 +81,21 @@ contract StakedTokenV2Special is ERC20Upgradeable, ERC20BurnableUpgradeable, Ree
     function initialize( 
         string memory _name, 
         string memory _symbol, 
-        address _stakeableToken
+        address _stakeableToken,
+        address _originalStakedTokenAddress
     ) initializer public {
         __ERC20_init(_name, _symbol);
         __ERC20Burnable_init();
         __ReentrancyGuard_init();
         __AccessControl_init();
         _grantRole(MANAGER_ROLE, msg.sender);
-        originalStakedToken = IStakedTokenv2(IStakingFactoryv2(stakingFactory).predictStakedTokenAddress(_stakeableToken));
+        originalStakedToken = IStakedTokenv2(_originalStakedTokenAddress);
         stakeableToken = IERC20(_stakeableToken);
         pool = IDistributionPool(originalStakedToken.pool());
         lockDuration = originalStakedToken.lockDuration();
         unitDecimals = 18;
-        stakingFactory = 0xC749105bc4b4eA6285dBBe2E8221c922BEA07A9d; // StakingFactoryV2 address
-        _grantRole(DEFAULT_ADMIN_ROLE, IStakingFactoryv2(stakingFactory).teamRecipient());
-        _grantRole(MANAGER_ROLE, IStakingFactoryv2(stakingFactory).teamRecipient());
+        _grantRole(DEFAULT_ADMIN_ROLE, IStakingFactoryv2(oldStakingFactory).teamRecipient());
+        _grantRole(MANAGER_ROLE, IStakingFactoryv2(oldStakingFactory).teamRecipient());
     }
 
     function stake(address to, uint256 amount) external nonReentrant {

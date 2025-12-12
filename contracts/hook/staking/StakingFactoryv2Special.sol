@@ -18,7 +18,8 @@ interface IStakedToken {
     function initialize(
         string memory _name, 
         string memory _symbol, 
-        address _stakeableToken
+        address _stakeableToken,
+        address _originalStakedTokenAddress
     ) external;
     function updateMemberUnits(address memberAddr, uint128 newUnits) external;
 }
@@ -39,14 +40,16 @@ contract StakingFactoryV2Special is AccessControl {
 
     function createStakedToken(
         address stakeableToken,
-        uint256 supply
+        uint256 supply,
+        address originalStakedTokenAddress
     ) external returns (address stakedToken) {
-        stakedToken = _createStakedToken(stakeableToken, supply);
+        stakedToken = _createStakedToken(stakeableToken, supply, originalStakedTokenAddress);
     }
 
     function _createStakedToken(
         address stakeableToken,
-        uint256 supply
+        uint256 supply,
+        address originalStakedTokenAddress
     ) internal returns (address stakedToken) {
         // @dev 1. Create a new staked token -- stakeableToken must be a super token
         //bytes32 salt = keccak256(abi.encode(msg.sender, symbol));
@@ -62,7 +65,7 @@ contract StakingFactoryV2Special is AccessControl {
         // @dev 3. Initialize the staked token
         string memory name = string(abi.encodePacked("New Staked ", IERC20(stakeableToken).name()));
         string memory symbol = string(abi.encodePacked("newst", IERC20(stakeableToken).symbol()));
-        IStakedToken(stakedToken).initialize(name, symbol, stakeableToken);
+        IStakedToken(stakedToken).initialize(name, symbol, stakeableToken, originalStakedTokenAddress);
 
         emit StakedTokenCreated(stakedToken, stakeableToken, supply);
 
